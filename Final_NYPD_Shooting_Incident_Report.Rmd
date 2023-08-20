@@ -1,6 +1,6 @@
 ---
 title: "Final NYPD Shooting Incident Report"
-author: "Student"
+author: "Carlos Matherson"
 date: "2023-08-20"
 output:
   pdf_document: default
