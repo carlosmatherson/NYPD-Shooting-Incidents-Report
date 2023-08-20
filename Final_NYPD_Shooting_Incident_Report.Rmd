@@ -1,0 +1,167 @@
+---
+title: "Final NYPD Shooting Incident Report"
+author: "Student"
+date: "2023-08-20"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Library
+Here are the libraries used in this report.
+```{r library, message=FALSE}
+library("tidyverse")
+library("lubridate")
+```
+
+## Importing
+Here, the historical NYPD shooting incident data is imported via URL as a .csv file. The variable `url` is the link to the raw data that is read in as `raw_data_shootings`.
+```{r import_data}
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+raw_data_shootings <- read_csv(url,show_col_types = FALSE)
+
+summary(raw_data_shootings)
+```
+
+## Tidying
+The raw shooting incidents data is cleaned to include standardized occurrence dates as well as the borough of New York in which the shooting incident occurred. This report is concerned with shooting incidents that were not labeled statistical murders. Missing data is removed after the data of interest is selected. The variable `data_shootings` stores the tidy data.
+```{r tidy_data}
+data_shootings <- raw_data_shootings %>% filter(STATISTICAL_MURDER_FLAG==FALSE) %>% select(OCCUR_DATE,BORO) %>% drop_na() 
+data_shootings$OCCUR_DATE <- mdy(data_shootings$OCCUR_DATE)
+
+summary(data_shootings)
+```
+
+## Cumulative Nonlethal Shooting Incidents in New York
+### Transforming
+In order to take a look at the trends in shooting victims over the years (without regard for the region in which it happened), the incidents are grouped by date and tallied. The time series data for cumulative shooting victims is stored in `ts_data_shootings`, and it includes the number of incidents per date. It is important to note that the data contains a row for every victim, according to the data set footnotes, and that multiple incidents share the same incident key. In this report, the total victims are the interest, not the number of incidents. For simplicity, lets consider each victim to be a separate incident and disregard the incident keys. Thus, shooting incidents and shooting victims will be used interchangeably throughout the report.
+```{r trans_data_tot}
+ts_data_shootings <- data_shootings %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+
+head(ts_data_shootings)
+```
+### Visualizing
+It is wise to explore the data initially, so the cumulative number of victims from nonlethal shooting incidents in New York are plotted over the time period of the data on a linear scale. The shootings seem to grow steadily and show sign of acceleration after the year 2020. In fact, there seems to be a spike in shooting incidents during 2020. This is something to look into as this aligns with the COVID-19 Pandemic.
+```{r vis_data_tot}
+ggplot() +
+  geom_line(data=ts_data_shootings, aes(x=OCCUR_DATE, y=cumsum(COUNT))) + 
+  labs(title = "Cumulative Nonlethal Shooting Victims in New York") +
+  labs(y="Number of Shooting Victims", x="Occurence Date") 
+```
+
+## Yearly Percent Change in Nonlethal Shooting Incidents in New York
+### Transforming
+Because there seems to be a spike in 2020, the data is transformed and stored in `yearly_data` to represent the number of shooting victims per year instead of per day. Then, the percent change of each year is calculated to analyze trends in shootings between years. The goal here is to compare the percent change in the year 2020 to the rest of the data.
+```{r trans_data_tot_by_years}
+yearly_data <- ts_data_shootings
+yearly_data$OCCUR_DATE <- yearly_data$OCCUR_DATE %>% year()
+yearly_data <- yearly_data %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+yearly_pct_chnge <- yearly_data %>% mutate(pct_change = ((COUNT/lag(COUNT) - 1) * 100)) 
+```
+### Visualizing
+Here, the percent change in the number of victims from nonlethal shooting incidents in New York are plotted over each year. The percent change in shooting victims seems to follow a slight sinusoidal trend, which could be an interesting finding to dive into deeper. Notably, there is a large spike during the year 2019 that subsequently declines during 2020 to the previous high percent change. From this plot, we can confirm that in fact, there is a significantly large spike in shooting incidents based on the magnitude of the percent increase from the previous year.
+```{r vis_data_tot_by_pct_change}
+ggplot() +
+  geom_line(data=yearly_pct_chnge[-1,],aes(x=`OCCUR_DATE`, y=`pct_change`)) + 
+  labs(title = "% Change in Victims of NY Nonlethal Shootings") + 
+  labs(y="% Change in Number of Shooting Victims", x="Years (2007-2021)") + 
+  scale_x_continuous(breaks = pretty(yearly_pct_chnge$OCCUR_DATE, n = 20))
+```
+
+### Modeling
+Here, a linear regression model is used to compare the correlation of the date and yearly percent change. When considering only the years 2007-2015, there seems to be a relatively strong correlation. This correlation weakens when the subsequent years up to 2020 are included in the model. There is a weak correlation between the two variables. The change in tightness of the model after 2015 gives reason to suspect global events may correlate with the number of shooting incidents, potentially including presidential elections, rise in social media,  and the pandemic.
+```{r model_data_tot_pct_change}
+mod <- lm(COUNT ~ OCCUR_DATE, data = yearly_pct_chnge)
+
+summary(mod)
+
+preds <- yearly_pct_chnge %>% mutate(pred = predict(mod))
+
+preds %>% ggplot() + geom_point(aes(x=OCCUR_DATE,y=COUNT,color = "Raw Data")) + 
+  geom_line(aes(x=OCCUR_DATE,y=pred, color = "Prediciton")) + 
+  scale_x_continuous(breaks = pretty(yearly_pct_chnge$OCCUR_DATE, n = 10)) + 
+  labs(title = "Linear Regression %Change in Victims vs Predictions") + 
+  labs(y="% Change in Number of Shooting Victims", x="Years (2007-2021)", color="Legend")
+```
+
+## Cumulative Nonlethal Shooting Incidents by Borough
+### Transforming
+It is just as interesting to take a look at shooting victims in each of the 5 boroughs of New York (Bronx, Brooklyn, Manhattan, Queens, and Staten Island) over time. The data is sorted into new data frames according to their borough using the `data_shooting` data frame and filtering by `BORO`. 
+```{r trans_data_by_boro}
+bronx_n <- data_shootings %>% filter(BORO == "BRONX") %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+brooklyn_n <- data_shootings %>% filter(BORO == "BROOKLYN") %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+manhattan_n <- data_shootings %>% filter(BORO == "MANHATTAN") %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+queens_n <- data_shootings %>% filter(BORO == "QUEENS") %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+staten_n <-data_shootings %>% filter(BORO == "STATEN ISLAND") %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+```
+### Visualizing
+In comparing the boroughs on a linear-scale plot, Brooklyn leads New York in shootings by a large margin, followed by Bronx, Manhattan, Queens, then Staten Island. Something to consider in a future analysis of this data is the location, geographical size, and population of each of the boroughs. It would be interesting to see the data represented per capita, but no year-by-year population data is available at this time. However, it does seem that Staten Island did not see a large spike in shooting incidents. This is investigated in the next section.
+```{r vis_data_by_boro}
+ggplot() +
+  geom_line(data=bronx_n, aes(x=OCCUR_DATE, y=cumsum(COUNT), color='Bronx')) + 
+  geom_line(data=brooklyn_n, aes(x=OCCUR_DATE, y=cumsum(COUNT), color='Brooklyn')) + 
+  geom_line(data=manhattan_n, aes(x=OCCUR_DATE, y=cumsum(COUNT), color='Manhattan')) + 
+  geom_line(data=queens_n, aes(x=OCCUR_DATE, y=cumsum(COUNT), color='Queens')) + 
+  geom_line(data=staten_n, aes(x=OCCUR_DATE, y=cumsum(COUNT), color='Staten Island')) + 
+  labs(title = "Nonlethal Shooting Incident Victims Count in each Boros of NY") + 
+  labs(y="Number of Shootings", x="Years", color="Boroughs") 
+```
+
+## Yearly Percent Change in Nonlethal Shooting Incidents by Borough
+### Transforming
+Because it is not obvious whether Staten Island, the borough with the fewest cumulative shooting incidents, experienced a large spike in shooting incidents, let's look at the yearly percent change compared to the the Bronx, the borough with the highest cumulative shooting incidents. The data is transformed to contain percent change over the years and stored appropriately in     `bronx_pct` and `staten_pct`
+```{r trans_data_by_boros_pct_change}
+bronx_yearly <- bronx_n
+bronx_yearly$OCCUR_DATE <- bronx_yearly$OCCUR_DATE %>% year()
+bronx_yearly <- bronx_yearly %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+bronx_pct <- bronx_yearly %>% mutate(pct_change = ((COUNT/lag(COUNT) - 1) * 100)) 
+
+staten_yearly <- staten_n
+staten_yearly$OCCUR_DATE <- staten_yearly$OCCUR_DATE %>% year()
+staten_yearly <- staten_yearly %>% group_by(OCCUR_DATE) %>% summarise(COUNT=n()) %>% ungroup()
+staten_pct <- staten_yearly %>% mutate(pct_change = ((COUNT/lag(COUNT) - 1) * 100)) 
+
+summary(bronx_pct)
+summary(staten_pct)
+```
+### Visualizing
+From the summary it seems that Staten Island also experienced the spike in gun violence. Below, a graph confirms this visually. You can see that the graphs move mostly independently of each other aside form the large spike in 2020. In the next block of code, a model is created to provide more insight.
+```{r vis_data_by_boro_pct_change}
+ggplot() +
+  geom_line(data=staten_pct[-1,],aes(x=`OCCUR_DATE`, y=`pct_change`, color="Staten Island")) +
+  geom_line(data=bronx_pct[-1,],aes(x=`OCCUR_DATE`, y=`pct_change`, color="The Bronx")) +
+  labs(title = "% Change in NY Nonlethal Shootings: Staten Island v The Bronx") + 
+  labs(y="% Change in Number of Shooting Victims", x="Years (2007-2021)") + 
+  scale_x_continuous(breaks = pretty(bronx_pct$OCCUR_DATE, n = 20)) +
+  scale_y_continuous(breaks = pretty(bronx_pct$pct_change, n = 15))
+```
+
+### Modeling
+Here, a linear regression model is used to compare the correlation between the percent change in shooting incidents in Staten Island and the Bronx. There is no correlation between the two boroughs, which is evidence that the coincidence in simialr percent change in 2020 is an anomaly, likely linked to external factors or global events, like the pandemic.
+```{r mode_data_by_boro_pct_change}
+
+both_data_pct <- merge(bronx_pct[-1,],staten_pct[-1,], by="OCCUR_DATE")
+
+mod <- lm(pct_change.x ~ pct_change.y, data = both_data_pct)
+
+summary(mod)
+
+preds <- both_data_pct %>% mutate(pred = predict(mod))
+
+preds %>% ggplot() + geom_point(aes(x=pct_change.x,y=pct_change.y,color = "Raw Data")) + 
+  geom_line(aes(x=pct_change.x,y=pred, color = "Prediciton")) + 
+  scale_x_continuous(breaks = pretty(yearly_pct_chnge$OCCUR_DATE, n = 10)) + 
+  labs(title = "Correlation between Yearly Shootings % Change 
+       in the Bronx and Staten Island") + 
+  labs(y="Staten Island Yearly Shooting % Change", 
+       x="Bronx Yearly Shooting % Change", color="Legend")
+```
+
+## Bias
+The data used in this report was collected from the City of New York's open access database. Potential bias may be present in the data dependent on the collection method by the New York Police Department. For instance, there can be under reported or over reported areas where incidents may happen, and thus it is possible that the data does not contain information from specific areas or too much information proportionally from other areas of New York. There are also external factors that can effect how the data is originated including socioeconomic status, regional demographics, and other factors. Of course, these considerations should be carefully deliberated before drawing any strong conclusions from models creatd by the data. Additionally, some trends in the data may reflect shifts in behvior due to the pandemic, which is the running hypothesis throughout the report.
